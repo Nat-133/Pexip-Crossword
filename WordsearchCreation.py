@@ -2,6 +2,8 @@ import random
 from string import ascii_lowercase as letters
 import itertools
 from collections import namedtuple
+import time
+import json
 
 def generateWords(count : int) -> list[str]:
     """ uses numbers for debugging purposes """
@@ -71,32 +73,31 @@ def placeRight(word : str, i : int, j: int, board : list[list[str]]):
 Word = namedtuple('Word', 'word i j isRight')
 
 def fillWords(board: list[list[str]], words : list[str]) -> list[Word]:
-    if not words:
-        print(board)
-        return []
-    word = random.choice(words)
-    words.remove(word)
-    randomI = list(range(len(board)))
-    randomJ = list(range(len(board)))
-    random.shuffle(randomI)
-    random.shuffle(randomJ)
-    for i, j in itertools.product(randomI, randomJ):
-        placementOptions = [placeDown, placeRight]
-        random.shuffle(placementOptions)
-        for placeWord in placementOptions:  # either place left or down
+    words.sort(key= lambda x: -len(x))
+    solution = []
+    undoStack = []
+    while words:
+        word = words[0]
+        for _ in range(10):
+            i = random.randrange(len(board))
+            j = random.randrange(len(board))
+            placeWord = random.choice([placeDown, placeRight])
             try:
                 undo = placeWord(word, i, j, board)
             except ValueError:
-                continue  # if placement fails, try the next option
+                continue
             
-            try:
-                s = fillWords(board, words) + [Word(word, i, j, placeWord is placeRight)]
-                print(s)
-                return s 
-            except ValueError:
-                undo()  # undo the placement and try next option
-    
-    raise ValueError(f"board cannot be filled with the given words")
+            undoStack.append(placeWord)
+            solution.append(Word(word, i, j, placeWord is placeRight))
+            words.remove(word)
+            break
+        else:
+            oldWord = solution.pop()
+            words.insert(oldWord.word,0)
+            undo = undoStack.pop()
+            undo()
+
+    return solution
 
 def fillLooseLetters(board):
     it = range(len(board))
@@ -104,18 +105,43 @@ def fillLooseLetters(board):
         if board[i][j] == ' ':
             board[i][j] = random.choice(letters)
 
+def flattenBoard(board : list[list[str]]) -> str:
+    return ''.join([''.join(row) for row in board])
+
+def storeWordsearch(boardString : str, size : int, solution : list[Word]) -> None:
+    with open("wordsearches.txt", "a") as f:
+        solutionDump = json.dumps(solution, separators=(',',':'))
+        f.write(f"{size}\n")
+        f.write(f"{boardString}\n")
+        f.write(f"{solutionDump}\n\n")
+
+def getWordsearches() -> list[tuple[int, str, list[Word]]]:
+    with open("wordsearches.txt", "r") as f:
+        raw = f.read()
+    rawSearches = raw.split("\n\n")[:-1]
+    rawData = [search.split("\n") for search in rawSearches]
+    searches = [(int(s[0]), s[1], json.loads(s[2])) for s in rawData]
+    # searches is list of (size, wordsearch, solution) tuples
+    return searches
 
 def generateWordSearch():
     print("> generating empty board")
-    board = generateBoard(10**4)
+    board = generateBoard(100)
     print("> generating words")
-    words = generateWords(10**6)
+    words = generateWords(100)
     print("> placing words")
+    start = time.time()
     solution = fillWords(board, words)
+    duration = time.time()-start
+    placedWordCount = len(solution)
     print("> populating letters")
     fillLooseLetters(board)
-    return board, solution
+    
+    boardString = flattenBoard(board)
+    storeWordsearch(boardString, len(board), solution)
+    return boardString, solution
 
-
-board, solution = generateWordSearch()
-print(board)
+if __name__ == "__main__":
+    getWordsearches()
+    board, solution = generateWordSearch()
+    print(board)
