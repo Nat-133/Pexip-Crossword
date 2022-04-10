@@ -1,9 +1,13 @@
 import math
 import itertools
 from dataclasses import dataclass
+import threading
 
 @dataclass
 class Location:
+    """
+    represents the location of a string in the string representation of a grid 
+    """
     index : int
     offset : int  # how far apart the chars are (either 1 or the row size)
 
@@ -16,95 +20,54 @@ class WordSearch:
 
         self.stringHashLength = 6
         self._letterLookup = None
-        self._stringLookup = None
-
-    @property
-    def rotatedGrid(self) -> list[str]:
-        if not self._rotatedGrid:
-            self._rotatedGrid = [self.stringGrid[i::self.ROW_LENGTH] for i in range(self.ROW_LENGTH)]
-        return self._rotatedGrid
+        self.stringLookup = self.generateStringLookup()
     
-    @property
-    def grid(self) -> list[str]:
-        if not self._grid:
-            self._grid = [self.stringGrid[i*self.ROW_LENGTH:(i+1)*self.ROW_LENGTH] 
-                          for i in range(self.ROW_LENGTH)]
-        return self._grid
-    
-    @property
-    def letterLookup(self) -> dict[str, int]:
-        if not self._letterLookup:
-            self._letterLookup = {}
-            for i,c in enumerate(self.stringGrid):
-                try:
-                    self._letterLookup[c].append(i)
-                except KeyError:
-                    self._letterLookup[c] = [i]
-
-        return self._letterLookup
-
-    @property
-    def stringLookup(self) -> dict[str, Location]:
-        if not self._stringLookup:
-            self._stringLookup = {}
+    def generateStringLookup(self) -> dict[str, list[Location]]:
+        _stringLookup = {}
+        def addSubstrings(length):
+            # adds all substrings of <length> from the grid to _stringLookup
             for i, c in enumerate(self.stringGrid):
-                try:
-                    self._stringLookup[c].append(Location(i, 1))
-                except KeyError:
-                    self._stringLookup[c] = [Location(i, 1)]
+                if length == 1:
+                    # special case, when length=1, just don't add the down version.
+                    try:
+                        _stringLookup[c].append(Location(i, 1))
+                    except KeyError:
+                        _stringLookup[c] = [Location(i, 1)]
+                    continue
 
-                # strings up to length hashLength starting from current char
                 maxRightLength = min(self.stringHashLength, self.ROW_LENGTH - i%self.ROW_LENGTH)
-                rightStrings = [self.stringGrid[i:i+j] for j in range(2, maxRightLength+1)]
-                # same but going down
+                rightString = self.stringGrid[i:i+length]
+
                 maxDownLength = min(self.stringHashLength, self.ROW_LENGTH - i//self.ROW_LENGTH)
-                downStrings = [self.stringGrid[i : i+j*self.ROW_LENGTH : self.ROW_LENGTH] 
-                               for j in range(2, maxDownLength+1)]
-                keyValuePairs = [(s, Location(i, 1)) for s in rightStrings]
-                keyValuePairs += [(s, Location(i, self.ROW_LENGTH)) for s in downStrings]
+                downString = self.stringGrid[i : i+length*self.ROW_LENGTH : self.ROW_LENGTH]
+
+                keyValuePairs = []
+                if length <= maxRightLength:
+                    keyValuePairs += [(rightString, Location(i, 1))]
+                if length <= maxDownLength:
+                    keyValuePairs += [(downString, Location(i, self.ROW_LENGTH))]
 
                 for s, location in keyValuePairs:
                     try:
-                        self._stringLookup[s].append(location)
+                        _stringLookup[s].append(location)
                     except KeyError:
-                        self._stringLookup[s] = [location]
-
-        return self._stringLookup
+                        _stringLookup[s] = [location]
+        
+        threads = []
+        # starts a thread for each substring length 
+        # this removes the need for the shared dictionary elements to be protected with mutexes.
+        # each thread has a mutually exclusive set of substrings.
+        for i in range(1, self.stringHashLength+1):
+            t = threading.Thread(target=addSubstrings, args=(i,))
+            t.start()
+            threads.append(t)
+            
+        for t in threads:
+            t.join()
+        return _stringLookup
 
     def is_present(self, word):
         return self.statisticallyFasterLookup(word)
-
-    def bruteforceCheck(self, word):
-        """ it checks each letter in the grid twice """
-        for option in itertools.chain(self.grid, self.rotatedGrid):
-            if word in option:
-                return True
-        return False
-    
-    def lookupCheck(self, word):
-        """ 
-        only checks the correct starting characters, 
-        so on average, should take 1/26 of the time of bruteforce method 
-        (assuming uniform letter distribution)
-        """
-        for index in self.letterLookup[word[0]]:
-            placementOptions = []
-            maxDownIndex = index + len(word)*self.ROW_LENGTH
-            maxRightIndex = index + len(word)
-
-            canFitRight = (index % self.ROW_LENGTH + len(word)) > self.ROW_LENGTH
-            placementOptions += [range(index, maxRightIndex)] if canFitRight else [] 
-
-            canFitDown = maxDownIndex <= len(self.stringGrid)
-            placementOptions += [range(index, maxDownIndex, self.ROW_LENGTH)] if canFitDown else []
-
-            for placement in placementOptions:
-                for wordi, boardi in enumerate(placement):
-                    if self.stringGrid[boardi] != word[wordi]:
-                        break
-                else:
-                    return True
-        return False
 
     def statisticallyFasterLookup(self, word):
         """
@@ -152,16 +115,100 @@ class WordSearch:
             
             if wordchars == gridchars:
                 return True
+        return False 
+    
+
+    # below are my original attempts to solve the problem and their helper methods
+    @property
+    def rotatedGrid(self) -> list[str]:
+        """ 
+        A list of all the columns
+        initialised when first referenced
+        Only used in the bruteforce search 
+        """
+        
+        if not self._rotatedGrid:
+            self._rotatedGrid = [self.stringGrid[i::self.ROW_LENGTH] for i in range(self.ROW_LENGTH)]
+        return self._rotatedGrid
+    
+    @property
+    def grid(self) -> list[str]:
+        """ 
+        A list of all the rows
+        initialised when first referenced
+        Only used in the bruteforce search 
+        """
+        if not self._grid:
+            self._grid = [self.stringGrid[i*self.ROW_LENGTH:(i+1)*self.ROW_LENGTH] 
+                          for i in range(self.ROW_LENGTH)]
+        return self._grid
+    
+    @property
+    def letterLookup(self) -> dict[str, list[int]]:
+        """
+        a dictionary that matches letters to a list of indexes where the letter appears
+        initialised when first referenced
+        """
+        if not self._letterLookup:
+            self._letterLookup = {}
+            for i,c in enumerate(self.stringGrid):
+                try:
+                    self._letterLookup[c].append(i)
+                except KeyError:
+                    self._letterLookup[c] = [i]
+
+        return self._letterLookup
+
+    def bruteforceCheck(self, word):
+        """ it checks each letter in the grid twice """
+        for option in itertools.chain(self.grid, self.rotatedGrid):
+            if word in option:
+                return True
         return False
+    
+    def lookupCheck(self, word):
+        """ 
+        only checks the correct starting characters, 
+        so on average, should take 1/26 of the time of bruteforce method 
+        (assuming uniform letter distribution)
+        """
+        for index in self.letterLookup[word[0]]:
+            placementOptions = []
+            maxDownIndex = index + len(word)*self.ROW_LENGTH
+            maxRightIndex = index + len(word)
+
+            canFitRight = (index % self.ROW_LENGTH + len(word)) > self.ROW_LENGTH
+            placementOptions += [range(index, maxRightIndex)] if canFitRight else [] 
+
+            canFitDown = maxDownIndex <= len(self.stringGrid)
+            placementOptions += [range(index, maxDownIndex, self.ROW_LENGTH)] if canFitDown else []
+
+            for placement in placementOptions:
+                for wordi, boardi in enumerate(placement):
+                    if self.stringGrid[boardi] != word[wordi]:
+                        break
+                else:
+                    return True
+        return False
+
+
+
+    
 
 if __name__ == "__main__":
     import WordsearchCreation
+    import time
+
     wordsearches = WordsearchCreation.getWordsearches()
     grid = wordsearches[0][1]
     words = [w[0] for w in wordsearches[0][2]]
     ws = WordSearch(grid)
+    print("initialised")
+    start = time.time()
     check1 = all(ws.is_present(word) for word in words)
-    
+    end = time.time()
+    print(f"finding ran in {end-start}s")
+
     randomWords = WordsearchCreation.generateWords(1000)
     randomWords = [word for word in randomWords if word not in "".join(words)]
     check2 = all(not ws.is_present(word) for word in randomWords)

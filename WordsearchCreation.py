@@ -5,13 +5,16 @@ from collections import namedtuple
 import time
 import json
 
-def generateWords(count : int) -> list[str]:
+def generateWords(count : int, debug=False) -> list[str]:
     """ uses numbers for debugging purposes """
     words = []
     for _ in range(count):
         length = int(random.triangular(4, 24, 9))
-        newWord = str(random.randrange(10**length))
-        newWord = "0"*(length-len(newWord)) + newWord
+        if debug:
+            newWord = str(random.randrange(10**length))
+            newWord = "0"*(length-len(newWord)) + newWord
+        else:
+            newWord = ''.join([random.choice(letters) for _ in range(length)])
 
         words.append(newWord)
     
@@ -87,13 +90,13 @@ def fillWords(board: list[list[str]], words : list[str]) -> list[Word]:
             except ValueError:
                 continue
             
-            undoStack.append(placeWord)
+            undoStack.append(undo)
             solution.append(Word(word, i, j, placeWord is placeRight))
             words.remove(word)
             break
         else:
             oldWord = solution.pop()
-            words.insert(oldWord.word,0)
+            words.insert(0, oldWord.word)
             undo = undoStack.pop()
             undo()
 
@@ -126,9 +129,9 @@ def getWordsearches() -> list[tuple[int, str, list[Word]]]:
 
 def generateWordSearch():
     print("> generating empty board")
-    board = generateBoard(100)
+    board = generateBoard(1000)
     print("> generating words")
-    words = generateWords(100)
+    words = generateWords(10**4)
     print("> placing words")
     start = time.time()
     solution = fillWords(board, words)
